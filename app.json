@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "FOLK Spiritual Gems",
+    "slug": "folk-spiritual-gems",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#3F51B5"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#3F51B5"
+      },
+      "package": "com.folkcrm.gems",
+      "permissions": [
+        "READ_CALL_LOG",
+        "READ_CONTACTS"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-sqlite",
+        {}
+      ]
+    ]
+  }
+}
