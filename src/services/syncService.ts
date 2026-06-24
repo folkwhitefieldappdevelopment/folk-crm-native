@@ -6,8 +6,8 @@ import {
   saveLocalContact 
 } from '../db/db';
 
-const BACKEND_URL = 'http://10.0.2.2:9002'; // Change to your cloud server URL for production
-// const BACKEND_URL = 'https://your-app.up.railway.app'; // Uncomment for cloud deployment
+const BACKEND_URL = 'https://YOUR-RAILWAY-URL.up.railway.app'; // Replace with your Railway URL
+// const BACKEND_URL = 'http://10.0.2.2:9002'; // For local Android emulator testing
 
 export async function runBidirectionalSync(authToken: string) {
   console.log('[Sync] Starting bidirectional synchronization...');
