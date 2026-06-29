@@ -1,12 +1,12 @@
 import axios from 'axios';
-import { 
-  getDB, 
-  getLastSyncedAt, 
-  setLastSyncedAt, 
-  saveLocalContact 
+import {
+  getDB,
+  getLastSyncedAt,
+  setLastSyncedAt,
+  saveLocalContact
 } from '../db/db';
 
-const BACKEND_URL = 'https://YOUR-RAILWAY-URL.up.railway.app'; // Replace with your Railway URL
+const BACKEND_URL = 'https://folk-crm-backend-production.up.railway.app'; // Replace with your Railway URL
 // const BACKEND_URL = 'http://10.0.2.2:9002'; // For local Android emulator testing
 
 export async function runBidirectionalSync(authToken: string) {
@@ -17,12 +17,12 @@ export async function runBidirectionalSync(authToken: string) {
     // ==========================================
     // 1. PUSH PHASE (Local Changes -> Server)
     // ==========================================
-    
+
     // Find locally modified/created contacts
     const dirtyContacts = await db.getAllAsync<any>(
       'SELECT * FROM people WHERE is_dirty = 1 AND is_deleted = 0'
     );
-    
+
     // Find locally deleted contacts
     const deletedContacts = await db.getAllAsync<any>(
       'SELECT id FROM people WHERE is_deleted = 1'
@@ -38,10 +38,10 @@ export async function runBidirectionalSync(authToken: string) {
       'SELECT * FROM attendance WHERE is_dirty = 1'
     );
 
-    const hasLocalChanges = 
-      dirtyContacts.length > 0 || 
-      deletedContacts.length > 0 || 
-      dirtyLogs.length > 0 || 
+    const hasLocalChanges =
+      dirtyContacts.length > 0 ||
+      deletedContacts.length > 0 ||
+      dirtyLogs.length > 0 ||
       dirtyAttendance.length > 0;
 
     if (hasLocalChanges) {
@@ -73,13 +73,13 @@ export async function runBidirectionalSync(authToken: string) {
 
       if (pushResponse.data.success) {
         console.log('[Sync] Push succeeded. Clearing local dirty flags...');
-        
+
         // Clear people flags
         if (dirtyContacts.length > 0) {
           const ids = dirtyContacts.map(c => `'${c.id}'`).join(',');
           await db.runAsync(`UPDATE people SET is_dirty = 0 WHERE id IN (${ids})`);
         }
-        
+
         // Clean deleted people records
         if (deletedContacts.length > 0) {
           const ids = deletedContacts.map(c => `'${c.id}'`).join(',');
@@ -111,7 +111,7 @@ export async function runBidirectionalSync(authToken: string) {
     console.log(`[Sync] Pulling updates since: ${since || 'Beginning of time'}`);
 
     const pullResponse = await axios.get(
-      `${BACKEND_URL}/sync/pull?since=${since || ''}`, 
+      `${BACKEND_URL}/sync/pull?since=${since || ''}`,
       { headers: { Authorization: `Bearer ${authToken}` } }
     );
 
@@ -129,7 +129,7 @@ export async function runBidirectionalSync(authToken: string) {
         if (localCheck && localCheck.is_dirty === 1) {
           const localUpdated = new Date(localCheck.updatedAt).getTime();
           const serverUpdated = new Date(serverPerson.updatedAt).getTime();
-          
+
           if (serverUpdated > localUpdated) {
             // Server wins, overwrite local
             await saveLocalContact(serverPerson, false);
@@ -199,6 +199,6 @@ export async function runBidirectionalSync(authToken: string) {
     await setLastSyncedAt(timestamp);
     console.log(`[Sync] Sync pull completed successfully. New sync marker: ${timestamp}`);
   } catch (error) {
-    console.error('[Sync] Error during synchronization cycle:', error.message);
+    console.error('[Sync] Error during synchronization cycle:', (error as Error).message);
   }
 }

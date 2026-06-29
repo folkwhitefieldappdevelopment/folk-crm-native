@@ -4,7 +4,6 @@
     "slug": "folk-spiritual-gems",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
       "backgroundColor": "#3F51B5"
@@ -22,11 +21,20 @@
         "READ_CONTACTS"
       ]
     },
+    "cli": {
+      "appVersionSource": "remote"
+    },
+    "owner": "folk_whitefield",
+    "extra": {
+      "eas": {
+        "projectId": "fc588c02-79af-45ca-bcd5-1a060faaad0b"
+      }
+    },
     "plugins": [
-      [
-        "expo-sqlite",
-        {}
-      ]
+      "expo-secure-store",
+      "expo-sqlite",
+      "expo-asset",
+      "expo-notifications"
     ]
   }
 }
