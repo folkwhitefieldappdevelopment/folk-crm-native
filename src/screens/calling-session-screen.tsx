@@ -15,6 +15,7 @@ import { Card } from '../ui/components/Card';
 import { Button } from '../ui/components/Button';
 import { Loading } from '../ui/components/Loading';
 import { getApiClient } from '../services/api-client';
+import { getSupabase } from '../services/supabase-client';
 
 const CALL_STATUSES = [
   'A1', 'A2', 'A3', 'A4',
@@ -68,9 +69,7 @@ export function CallingSessionScreen({ route, navigation }: Props) {
 
   const [selectedStatus, setSelectedStatus] = useState('');
   const [remark, setRemark] = useState('');
-  const [sgRating, setSgRating] = useState('');
-  const [maRating, setMaRating] = useState('');
-  const [frpRating, setFrpRating] = useState('');
+  const [isSg, setIsSg] = useState('');
   const [followUpDate, setFollowUpDate] = useState('');
   const [showHistory, setShowHistory] = useState(false);
 
@@ -101,9 +100,7 @@ export function CallingSessionScreen({ route, navigation }: Props) {
   function resetForm() {
     setSelectedStatus('');
     setRemark('');
-    setSgRating('');
-    setMaRating('');
-    setFrpRating('');
+    setIsSg('');
     setFollowUpDate('');
   }
 
@@ -121,6 +118,71 @@ export function CallingSessionScreen({ route, navigation }: Props) {
       });
     } catch (err) {
       console.error('Failed to update session index:', err);
+    }
+  }
+
+  async function ensureSpiritualGemsGroup(): Promise<string | null> {
+    try {
+      const supabase = getSupabase();
+      const { data: existing } = await supabase
+        .from('groups')
+        .select('id')
+        .eq('name', 'Spiritual Gems')
+        .maybeSingle();
+      if (existing) return existing.id;
+
+      const { data: created } = await supabase
+        .from('groups')
+        .insert({
+          name: 'Spiritual Gems',
+          description: 'Contacts marked as Spiritual Gems during outreach',
+          created_by_name: 'System',
+          creator_role: JSON.stringify(['Admin', 'Folk Guide', 'Folk Enabler']),
+          visibility: JSON.stringify(['Admin', 'Folk Guide', 'Folk Enabler']),
+          member_count: 0,
+          is_dynamic: false,
+          color: '#EAB308',
+        })
+        .select('id')
+        .single();
+      return created?.id || null;
+    } catch (err) {
+      console.error('Failed to ensure Spiritual Gems group:', err);
+      return null;
+    }
+  }
+
+  async function addPersonToSpiritualGems(personId: string) {
+    try {
+      const groupId = await ensureSpiritualGemsGroup();
+      if (!groupId) return;
+      const supabase = getSupabase();
+      await supabase.from('group_members').insert({
+        group_id: groupId,
+        contact_id: personId,
+      });
+    } catch (err) {
+      console.error('Failed to add to Spiritual Gems:', err);
+    }
+  }
+
+  async function removePersonFromSpiritualGems(personId: string) {
+    try {
+      const supabase = getSupabase();
+      const { data: group } = await supabase
+        .from('groups')
+        .select('id')
+        .eq('name', 'Spiritual Gems')
+        .maybeSingle();
+      if (group) {
+        await supabase
+          .from('group_members')
+          .delete()
+          .eq('group_id', group.id)
+          .eq('contact_id', personId);
+      }
+    } catch (err) {
+      console.error('Failed to remove from Spiritual Gems:', err);
     }
   }
 
@@ -148,22 +210,24 @@ export function CallingSessionScreen({ route, navigation }: Props) {
         lastCallAt: new Date().toISOString(),
         lastCallStatus: selectedStatus,
         lastCallRemark: remark || undefined,
+        isSg: isSg === 'Yes',
       };
 
-      if (sgRating) updatePayload.lastSg = parseInt(sgRating, 10);
-      if (maRating) updatePayload.lastMa = parseInt(maRating, 10);
-      if (frpRating) updatePayload.lastFrp = parseInt(frpRating, 10);
       if (followUpDate.trim()) {
         updatePayload.nextFollowUpAt = followUpDate.trim();
       }
 
-      const currentPersonData = await api.get(
-        `/people/${currentPerson.id}`
-      );
+      const currentPersonData = await api.get(`/people/${currentPerson.id}`);
       const existingHistory = currentPersonData.data.callHistory || [];
       updatePayload.callHistory = [...existingHistory, callEntry];
 
       await api.put(`/people/${currentPerson.id}`, updatePayload);
+
+      if (isSg === 'Yes') {
+        await addPersonToSpiritualGems(currentPerson.id);
+      } else if (isSg === 'No') {
+        await removePersonFromSpiritualGems(currentPerson.id);
+      }
 
       if (currentIdx < total - 1) {
         const nextIdx = currentIdx + 1;
@@ -264,7 +328,6 @@ export function CallingSessionScreen({ route, navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      {/* Progress Bar */}
       <View style={styles.progressContainer}>
         <View style={styles.progressBar}>
           <View
@@ -280,7 +343,6 @@ export function CallingSessionScreen({ route, navigation }: Props) {
       </View>
 
       <ScrollView style={styles.scrollArea}>
-        {/* Current Person Card */}
         {currentPerson ? (
           <Card style={styles.personCard}>
             <View style={styles.personHeader}>
@@ -290,9 +352,7 @@ export function CallingSessionScreen({ route, navigation }: Props) {
                 </Text>
               </View>
               <View style={styles.personInfo}>
-                <Text style={styles.personName}>
-                  {currentPerson.fullName}
-                </Text>
+                <Text style={styles.personName}>{currentPerson.fullName}</Text>
                 <Text style={styles.personPhone}>
                   📞 {currentPerson.phone || '—'}
                 </Text>
@@ -306,20 +366,12 @@ export function CallingSessionScreen({ route, navigation }: Props) {
                 )}
               </View>
             </View>
-
-            {/* Quick Actions */}
             <View style={styles.quickActions}>
-              <TouchableOpacity
-                style={styles.quickActionBtn}
-                onPress={handleCall}
-              >
+              <TouchableOpacity style={styles.quickActionBtn} onPress={handleCall}>
                 <Text style={styles.quickActionIcon}>📞</Text>
                 <Text style={styles.quickActionLabel}>Call</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.quickActionBtn}
-                onPress={handleWhatsApp}
-              >
+              <TouchableOpacity style={styles.quickActionBtn} onPress={handleWhatsApp}>
                 <Text style={styles.quickActionIcon}>💬</Text>
                 <Text style={styles.quickActionLabel}>WhatsApp</Text>
               </TouchableOpacity>
@@ -327,13 +379,10 @@ export function CallingSessionScreen({ route, navigation }: Props) {
           </Card>
         ) : (
           <Card style={styles.personCard}>
-            <Text style={styles.emptyPerson}>
-              No more contacts in this session
-            </Text>
+            <Text style={styles.emptyPerson}>No more contacts in this session</Text>
           </Card>
         )}
 
-        {/* Call Status */}
         <Card style={styles.card}>
           <Text style={styles.cardTitle}>Call Status</Text>
           <View style={styles.statusGrid}>
@@ -344,13 +393,9 @@ export function CallingSessionScreen({ route, navigation }: Props) {
                   styles.statusBtn,
                   {
                     backgroundColor:
-                      selectedStatus === s
-                        ? STATUS_COLORS[s]
-                        : Colors.surface,
+                      selectedStatus === s ? STATUS_COLORS[s] : Colors.surface,
                     borderColor:
-                      selectedStatus === s
-                        ? STATUS_COLORS[s]
-                        : Colors.border,
+                      selectedStatus === s ? STATUS_COLORS[s] : Colors.border,
                   },
                 ]}
                 onPress={() => setSelectedStatus(s)}
@@ -360,9 +405,7 @@ export function CallingSessionScreen({ route, navigation }: Props) {
                     styles.statusBtnText,
                     {
                       color:
-                        selectedStatus === s
-                          ? '#FFF'
-                          : STATUS_COLORS[s],
+                        selectedStatus === s ? '#FFF' : STATUS_COLORS[s],
                     },
                   ]}
                 >
@@ -373,47 +416,31 @@ export function CallingSessionScreen({ route, navigation }: Props) {
           </View>
         </Card>
 
-        {/* SG / MA / FRP */}
         <Card style={styles.card}>
-          <Text style={styles.cardTitle}>Ratings</Text>
-          <View style={styles.ratingRow}>
-            <View style={styles.ratingField}>
-              <Text style={styles.ratingLabel}>SG</Text>
-              <TextInput
-                style={styles.ratingInput}
-                value={sgRating}
-                onChangeText={setSgRating}
-                placeholder="0-10"
-                placeholderTextColor="#888"
-                keyboardType="number-pad"
-              />
-            </View>
-            <View style={styles.ratingField}>
-              <Text style={styles.ratingLabel}>MA</Text>
-              <TextInput
-                style={styles.ratingInput}
-                value={maRating}
-                onChangeText={setMaRating}
-                placeholder="0-10"
-                placeholderTextColor="#888"
-                keyboardType="number-pad"
-              />
-            </View>
-            <View style={styles.ratingField}>
-              <Text style={styles.ratingLabel}>FRP</Text>
-              <TextInput
-                style={styles.ratingInput}
-                value={frpRating}
-                onChangeText={setFrpRating}
-                placeholder="0-10"
-                placeholderTextColor="#888"
-                keyboardType="number-pad"
-              />
-            </View>
+          <Text style={styles.cardTitle}>Is he SG?</Text>
+          <View style={styles.isSgRow}>
+            {['Yes', 'No'].map((opt) => (
+              <TouchableOpacity
+                key={opt}
+                style={[
+                  styles.isSgBtn,
+                  isSg === opt && styles.isSgBtnActive,
+                ]}
+                onPress={() => setIsSg(isSg === opt ? '' : opt)}
+              >
+                <Text
+                  style={[
+                    styles.isSgBtnText,
+                    isSg === opt && styles.isSgBtnTextActive,
+                  ]}
+                >
+                  {opt}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
         </Card>
 
-        {/* Remark */}
         <Card style={styles.card}>
           <Text style={styles.cardTitle}>Remark</Text>
           <TextInput
@@ -428,11 +455,8 @@ export function CallingSessionScreen({ route, navigation }: Props) {
           />
         </Card>
 
-        {/* Follow-up */}
         <Card style={styles.card}>
-          <Text style={styles.cardTitle}>
-            Follow-up Date (YYYY-MM-DD)
-          </Text>
+          <Text style={styles.cardTitle}>Follow-up Date (YYYY-MM-DD)</Text>
           <TextInput
             style={styles.input}
             value={followUpDate}
@@ -442,67 +466,55 @@ export function CallingSessionScreen({ route, navigation }: Props) {
           />
         </Card>
 
-        {/* Call History */}
-        {currentPerson?.callHistory &&
-          currentPerson.callHistory.length > 0 && (
-            <Card style={styles.card}>
-              <TouchableOpacity
-                style={styles.historyToggle}
-                onPress={() => setShowHistory(!showHistory)}
-              >
-                <Text style={styles.cardTitle}>
-                  Call History (
-                  {currentPerson.callHistory.length})
-                </Text>
-                <Text style={styles.historyChevron}>
-                  {showHistory ? '▲' : '▼'}
-                </Text>
-              </TouchableOpacity>
-              {showHistory &&
-                currentPerson.callHistory
-                  .slice(-5)
-                  .reverse()
-                  .map((log, idx) => (
-                    <View
-                      key={log.id || idx}
-                      style={styles.historyItem}
-                    >
-                      <View style={styles.historyRow}>
-                        <Text
-                          style={[
-                            styles.historyStatus,
-                            {
-                              color:
-                                STATUS_COLORS[log.status || ''] ||
-                                Colors.textPrimary,
-                            },
-                          ]}
-                        >
-                          {log.status}
-                        </Text>
-                        <Text style={styles.historyDate}>
-                          {log.calledAt
-                            ? new Date(
-                                log.calledAt
-                              ).toLocaleDateString()
-                            : ''}
-                        </Text>
-                      </View>
-                      {log.remark && (
-                        <Text style={styles.historyRemark}>
-                          {log.remark}
-                        </Text>
-                      )}
+        {currentPerson?.callHistory && currentPerson.callHistory.length > 0 && (
+          <Card style={styles.card}>
+            <TouchableOpacity
+              style={styles.historyToggle}
+              onPress={() => setShowHistory(!showHistory)}
+            >
+              <Text style={styles.cardTitle}>
+                Call History ({currentPerson.callHistory.length})
+              </Text>
+              <Text style={styles.historyChevron}>
+                {showHistory ? '▲' : '▼'}
+              </Text>
+            </TouchableOpacity>
+            {showHistory &&
+              currentPerson.callHistory
+                .slice(-5)
+                .reverse()
+                .map((log, idx) => (
+                  <View key={log.id || idx} style={styles.historyItem}>
+                    <View style={styles.historyRow}>
+                      <Text
+                        style={[
+                          styles.historyStatus,
+                          {
+                            color:
+                              STATUS_COLORS[log.status || ''] ||
+                              Colors.textPrimary,
+                          },
+                        ]}
+                      >
+                        {log.status}
+                      </Text>
+                      <Text style={styles.historyDate}>
+                        {log.calledAt
+                          ? new Date(log.calledAt).toLocaleDateString()
+                          : ''}
+                      </Text>
                     </View>
-                  ))}
-            </Card>
-          )}
+                    {log.remark && (
+                      <Text style={styles.historyRemark}>{log.remark}</Text>
+                    )}
+                  </View>
+                ))}
+          </Card>
+        )}
 
-        {/* Bottom padding */}
         <View style={{ height: 120 }} />
       </ScrollView>
 
-      {/* Bottom Actions */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
           style={styles.navBtn}
@@ -518,14 +530,9 @@ export function CallingSessionScreen({ route, navigation }: Props) {
             ◀ Prev
           </Text>
         </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.skipBtn}
-          onPress={handleSkip}
-        >
+        <TouchableOpacity style={styles.skipBtn} onPress={handleSkip}>
           <Text style={styles.skipBtnText}>Skip</Text>
         </TouchableOpacity>
-
         <Button
           title={currentIdx < total - 1 ? 'Save & Next' : 'Finish'}
           onPress={handleSaveAndNext}
@@ -545,265 +552,53 @@ export function CallingSessionScreen({ route, navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: Colors.background,
-  },
-  progressContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-    backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  progressBar: {
-    flex: 1,
-    height: 8,
-    backgroundColor: Colors.divider,
-    borderRadius: 4,
-    marginRight: Spacing.md,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: Colors.primary,
-    borderRadius: 4,
-  },
-  progressText: {
-    fontSize: FontSize.sm,
-    fontWeight: 'bold',
-    color: Colors.textSecondary,
-  },
-  scrollArea: {
-    flex: 1,
-  },
-  personCard: {
-    margin: Spacing.md,
-  },
-  personHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: Spacing.md,
-  },
-  avatarText: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: Colors.textOnPrimary,
-  },
-  personInfo: {
-    flex: 1,
-  },
-  personName: {
-    fontSize: FontSize.xl,
-    fontWeight: 'bold',
-    color: Colors.textPrimary,
-  },
-  personPhone: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  personStage: {
-    fontSize: FontSize.xs,
-    color: Colors.accent,
-    fontWeight: 'bold',
-    marginTop: 2,
-  },
-  personLocation: {
-    fontSize: FontSize.xs,
-    color: Colors.textLight,
-    marginTop: 2,
-  },
-  quickActions: {
-    flexDirection: 'row',
-    marginTop: Spacing.md,
-    gap: Spacing.sm,
-  },
-  quickActionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Spacing.sm,
-    backgroundColor: Colors.background,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  quickActionIcon: {
-    fontSize: 16,
-    marginRight: Spacing.xs,
-  },
-  quickActionLabel: {
-    fontSize: FontSize.md,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-  },
-  emptyPerson: {
-    textAlign: 'center',
-    color: Colors.textLight,
-    fontSize: FontSize.md,
-  },
-  card: {
-    marginHorizontal: Spacing.md,
-    marginBottom: Spacing.sm,
-  },
-  cardTitle: {
-    fontSize: FontSize.lg,
-    fontWeight: 'bold',
-    color: Colors.primary,
-    marginBottom: Spacing.sm,
-  },
-  statusGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.sm,
-  },
-  statusBtn: {
-    width: 48,
-    height: 40,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1.5,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  statusBtnText: {
-    fontSize: FontSize.md,
-    fontWeight: 'bold',
-  },
-  ratingRow: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-  },
-  ratingField: {
-    flex: 1,
-  },
-  ratingLabel: {
-    fontSize: FontSize.sm,
-    fontWeight: 'bold',
-    color: Colors.textSecondary,
-    marginBottom: Spacing.xs,
-    textAlign: 'center',
-  },
-  ratingInput: {
-    height: 44,
-    backgroundColor: Colors.background,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    textAlign: 'center',
-    fontSize: FontSize.lg,
-    color: Colors.textPrimary,
-  },
-  remarkInput: {
-    height: 80,
-    backgroundColor: Colors.background,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.md,
-    fontSize: FontSize.md,
-    color: Colors.textPrimary,
-  },
-  input: {
-    height: 44,
-    backgroundColor: Colors.background,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: Spacing.md,
-    fontSize: FontSize.md,
-    color: Colors.textPrimary,
-  },
-  historyToggle: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  historyChevron: {
-    fontSize: 12,
-    color: Colors.textLight,
-  },
-  historyItem: {
-    paddingVertical: Spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: Colors.divider,
-  },
-  historyRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  historyStatus: {
-    fontWeight: 'bold',
-    fontSize: FontSize.sm,
-  },
-  historyDate: {
-    fontSize: FontSize.xs,
-    color: Colors.textLight,
-  },
-  historyRemark: {
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  bottomBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: Spacing.md,
-    backgroundColor: Colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    gap: Spacing.sm,
-  },
-  navBtn: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  navBtnText: {
-    fontSize: FontSize.md,
-    fontWeight: 'bold',
-    color: Colors.primary,
-  },
-  navBtnDisabled: {
-    color: Colors.textLight,
-  },
-  skipBtn: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  skipBtnText: {
-    fontSize: FontSize.md,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-  },
-  saveBtn: {
-    flex: 1,
-    height: 44,
-  },
-  endBar: {
-    alignItems: 'center',
-    paddingBottom: Spacing.md,
-    backgroundColor: Colors.surface,
-  },
-  endText: {
-    fontSize: FontSize.sm,
-    color: Colors.error,
-    fontWeight: '600',
-  },
+  container: { flex: 1, backgroundColor: Colors.background },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background },
+  progressContainer: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  progressBar: { flex: 1, height: 8, backgroundColor: Colors.divider, borderRadius: 4, marginRight: Spacing.md, overflow: 'hidden' },
+  progressFill: { height: '100%', backgroundColor: Colors.primary, borderRadius: 4 },
+  progressText: { fontSize: FontSize.sm, fontWeight: 'bold', color: Colors.textSecondary },
+  scrollArea: { flex: 1 },
+  personCard: { margin: Spacing.md },
+  personHeader: { flexDirection: 'row', alignItems: 'center' },
+  avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center', marginRight: Spacing.md },
+  avatarText: { fontSize: 26, fontWeight: 'bold', color: Colors.textOnPrimary },
+  personInfo: { flex: 1 },
+  personName: { fontSize: FontSize.xl, fontWeight: 'bold', color: Colors.textPrimary },
+  personPhone: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 2 },
+  personStage: { fontSize: FontSize.xs, color: Colors.accent, fontWeight: 'bold', marginTop: 2 },
+  personLocation: { fontSize: FontSize.xs, color: Colors.textLight, marginTop: 2 },
+  quickActions: { flexDirection: 'row', marginTop: Spacing.md, gap: Spacing.sm },
+  quickActionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.sm, backgroundColor: Colors.background, borderRadius: BorderRadius.sm, borderWidth: 1, borderColor: Colors.border },
+  quickActionIcon: { fontSize: 16, marginRight: Spacing.xs },
+  quickActionLabel: { fontSize: FontSize.md, fontWeight: '600', color: Colors.textPrimary },
+  emptyPerson: { textAlign: 'center', color: Colors.textLight, fontSize: FontSize.md },
+  card: { marginHorizontal: Spacing.md, marginBottom: Spacing.sm },
+  cardTitle: { fontSize: FontSize.lg, fontWeight: 'bold', color: Colors.primary, marginBottom: Spacing.sm },
+  statusGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  statusBtn: { width: 48, height: 40, borderRadius: BorderRadius.sm, borderWidth: 1.5, justifyContent: 'center', alignItems: 'center' },
+  statusBtnText: { fontSize: FontSize.md, fontWeight: 'bold' },
+  isSgRow: { flexDirection: 'row', gap: Spacing.md },
+  isSgBtn: { flex: 1, height: 44, borderRadius: BorderRadius.sm, borderWidth: 1.5, borderColor: Colors.border, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.surface },
+  isSgBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  isSgBtnText: { fontSize: FontSize.md, fontWeight: 'bold', color: Colors.textSecondary },
+  isSgBtnTextActive: { color: Colors.textOnPrimary },
+  remarkInput: { height: 80, backgroundColor: Colors.background, borderRadius: BorderRadius.sm, borderWidth: 1, borderColor: Colors.border, padding: Spacing.md, fontSize: FontSize.md, color: Colors.textPrimary },
+  input: { height: 44, backgroundColor: Colors.background, borderRadius: BorderRadius.sm, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: Spacing.md, fontSize: FontSize.md, color: Colors.textPrimary },
+  historyToggle: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  historyChevron: { fontSize: 12, color: Colors.textLight },
+  historyItem: { paddingVertical: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.divider },
+  historyRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  historyStatus: { fontWeight: 'bold', fontSize: FontSize.sm },
+  historyDate: { fontSize: FontSize.xs, color: Colors.textLight },
+  historyRemark: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  bottomBar: { flexDirection: 'row', alignItems: 'center', padding: Spacing.md, backgroundColor: Colors.surface, borderTopWidth: 1, borderTopColor: Colors.border, gap: Spacing.sm },
+  navBtn: { paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
+  navBtnText: { fontSize: FontSize.md, fontWeight: 'bold', color: Colors.primary },
+  navBtnDisabled: { color: Colors.textLight },
+  skipBtn: { paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
+  skipBtnText: { fontSize: FontSize.md, fontWeight: '600', color: Colors.textSecondary },
+  saveBtn: { flex: 1, height: 44 },
+  endBar: { alignItems: 'center', paddingBottom: Spacing.md, backgroundColor: Colors.surface },
+  endText: { fontSize: FontSize.sm, color: Colors.error, fontWeight: '600' },
 });

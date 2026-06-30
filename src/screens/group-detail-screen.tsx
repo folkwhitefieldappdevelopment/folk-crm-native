@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,33 +7,31 @@ import {
   ActivityIndicator,
   RefreshControl,
   TouchableOpacity,
-  ScrollView,
 } from 'react-native';
 import { Colors, FontSize, Spacing, BorderRadius } from '../theme';
 import { Card } from '../ui/components/Card';
 import { Button } from '../ui/components/Button';
 import { Avatar } from '../ui/components/Avatar';
 import { IntelligentReportView } from '../ui/components/IntelligentReportView';
-import { getApiClient } from '../services/api-client';
+import { getSupabase } from '../services/supabase-client';
+import { useAuth } from '../contexts/auth-context';
 
 interface Group {
   id: string;
   name: string;
   description?: string;
-  createdByName?: string;
-  _count?: { members: number };
-  reportingEnabled?: boolean;
-  reportTime?: string;
-  members?: Array<{
-    id: string;
-    person?: {
-      id: string;
-      fullName: string;
-      phone?: string;
-      currentFolkStage?: string;
-      location?: string;
-    };
-  }>;
+  created_by_name?: string;
+  member_count?: number;
+}
+
+interface Person {
+  id: string;
+  full_name: string;
+  phone?: string;
+  current_folk_stage?: string;
+  location?: string;
+  enabler_id?: string;
+  folk_guide_id?: string;
 }
 
 interface Props {
@@ -43,22 +41,50 @@ interface Props {
 
 export function GroupDetailScreen({ route, navigation }: Props) {
   const { groupId } = route.params;
+  const { user } = useAuth();
   const [group, setGroup] = useState<Group | null>(null);
-  const [people, setPeople] = useState<any[]>([]);
+  const [people, setPeople] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showIntelligence, setShowIntelligence] = useState(false);
 
+  const visibleMembers = useMemo(() => {
+    if (!user) return people;
+    if (user.role.includes('Admin')) return people;
+    if (user.role.includes('Folk Guide')) return people.filter(p => p.folk_guide_id === user.id);
+    if (user.role.includes('Folk Enabler')) return people.filter(p => p.enabler_id === user.id);
+    return people;
+  }, [people, user]);
+
   const fetchGroup = useCallback(async () => {
     try {
-      const api = getApiClient();
-      const response = await api.get(`/groups/${groupId}`);
-      const data = response.data;
-      setGroup(data);
-      const memberPeople = (data.members || [])
-        .map((m: any) => m.person)
-        .filter(Boolean);
-      setPeople(memberPeople);
+      const supabase = getSupabase();
+
+      const { data: g } = await supabase
+        .from('groups')
+        .select('id, name, description, created_by_name, member_count')
+        .eq('id', groupId)
+        .single();
+
+      if (g) setGroup(g);
+
+      const { data: members } = await supabase
+        .from('group_members')
+        .select('contact_id')
+        .eq('group_id', groupId);
+
+      if (members && members.length > 0) {
+        const contactIds = members.map(m => m.contact_id);
+        const { data: ppl } = await supabase
+          .from('people')
+          .select('id, full_name, phone, current_folk_stage, location, enabler_id, folk_guide_id')
+          .in('id', contactIds)
+          .eq('is_deleted', false);
+
+        setPeople(ppl || []);
+      } else {
+        setPeople([]);
+      }
     } catch (err) {
       console.error('Failed to fetch group:', err);
     } finally {
@@ -74,15 +100,6 @@ export function GroupDetailScreen({ route, navigation }: Props) {
   function handleRefresh() {
     setRefreshing(true);
     fetchGroup();
-  }
-
-  function getMembers() {
-    if (!group?.members) return [];
-    return group.members
-      .map((m) => m.person)
-      .filter(Boolean) as NonNullable<
-      (typeof group.members)[0]['person']
-    >[];
   }
 
   if (loading) {
@@ -101,12 +118,10 @@ export function GroupDetailScreen({ route, navigation }: Props) {
     );
   }
 
-  const members = getMembers();
-
   return (
     <View style={styles.container}>
       <FlatList
-        data={members}
+        data={visibleMembers}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={
           <View>
@@ -115,15 +130,19 @@ export function GroupDetailScreen({ route, navigation }: Props) {
               {group.description && (
                 <Text style={styles.groupDesc}>{group.description}</Text>
               )}
-              {group.createdByName && (
+              {group.created_by_name && (
                 <Text style={styles.groupMeta}>
-                  Created by {group.createdByName}
+                  Created by {group.created_by_name}
                 </Text>
               )}
               <View style={styles.statRow}>
                 <View style={styles.stat}>
-                  <Text style={styles.statValue}>{members.length}</Text>
-                  <Text style={styles.statLabel}>Members</Text>
+                  <Text style={styles.statValue}>{visibleMembers.length}</Text>
+                  <Text style={styles.statLabel}>
+                    {visibleMembers.length === people.length
+                      ? 'Members'
+                      : `Visible (${people.length} total)`}
+                  </Text>
                 </View>
               </View>
 
@@ -168,7 +187,7 @@ export function GroupDetailScreen({ route, navigation }: Props) {
             )}
 
             <Text style={styles.sectionTitle}>
-              Members ({members.length})
+              Members ({visibleMembers.length})
             </Text>
           </View>
         }
@@ -182,14 +201,14 @@ export function GroupDetailScreen({ route, navigation }: Props) {
             }
             activeOpacity={0.7}
           >
-            <Avatar name={item.fullName} photoUrl={(item as any).photoUrl} size={40} />
+            <Avatar name={item.full_name} photoUrl={(item as any).photo_url} size={40} />
             <View style={styles.memberInfo}>
-              <Text style={styles.memberName}>{item.fullName}</Text>
+              <Text style={styles.memberName}>{item.full_name}</Text>
               <Text style={styles.memberPhone}>
                 {item.phone || '\u2014'}
               </Text>
               <Text style={styles.memberStage}>
-                {item.currentFolkStage}
+                {item.current_folk_stage}
               </Text>
             </View>
             <Text style={styles.chevron}>{'\u203A'}</Text>

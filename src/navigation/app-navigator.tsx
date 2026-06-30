@@ -21,6 +21,7 @@ import { ContactFormScreen } from '../screens/contact-form-screen';
 import { GroupListScreen } from '../screens/group-list-screen';
 import { GroupDetailScreen } from '../screens/group-detail-screen';
 import { SessionListScreen } from '../screens/session-list-screen';
+import { CallAssistantScreen } from '../screens/call-assistant-screen';
 import { SessionSelectContactsScreen } from '../screens/session-select-contacts-screen';
 import { CallingSessionScreen } from '../screens/calling-session-screen';
 import { ProfileScreen } from '../screens/profile-screen';
@@ -64,7 +65,16 @@ type AuthStackParamList = {
 };
 
 type ContactsStackParamList = {
-  ContactsList: undefined;
+  ContactsList: {
+    scope?: string;
+    contactSource?: string;
+    callStatus?: string;
+    event?: string;
+    isSg?: string;
+    chantingStatus?: string;
+    folkStage?: string;
+    enablerId?: string;
+  } | undefined;
   ContactDetail: { personId: string };
   ContactForm: { personId?: string };
 };
@@ -76,6 +86,7 @@ type GroupsStackParamList = {
 
 type SessionsStackParamList = {
   SessionList: undefined;
+  CallAssistant: undefined;
   SelectContacts: undefined;
   CallingSession: { sessionId: string };
 };
@@ -223,6 +234,11 @@ function SessionsNavigator() {
         name="SessionList"
         component={SessionListScreen}
         options={{ title: 'Sessions' }}
+      />
+      <SessionsStack.Screen
+        name="CallAssistant"
+        component={CallAssistantScreen}
+        options={{ title: 'Call Assistant' }}
       />
       <SessionsStack.Screen
         name="SelectContacts"

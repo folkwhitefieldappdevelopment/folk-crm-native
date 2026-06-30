@@ -6,12 +6,15 @@ import {
   ScrollView,
   Alert,
   TouchableOpacity,
+  Image,
 } from 'react-native';
 import { Colors, FontSize, Spacing, BorderRadius } from '../theme';
 import { Card } from '../ui/components/Card';
 import { Loading } from '../ui/components/Loading';
 import { Button } from '../ui/components/Button';
 import { getApiClient } from '../services/api-client';
+import { getSupabase } from '../services/supabase-client';
+import { ProgressTracker } from '../ui/components/ProgressTracker';
 
 interface Person {
   id: string;
@@ -33,6 +36,7 @@ interface Person {
   folkGuideId?: string;
   folkId?: string;
   createdAt?: string;
+  progress?: any[];
   callHistory?: CallLog[];
   attendanceHistory?: AttendanceEntry[];
   generalRemarks?: string;
@@ -65,6 +69,8 @@ export function ContactDetailScreen({ route, navigation }: Props) {
   const [person, setPerson] = useState<Person | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
+  const [enablerName, setEnablerName] = useState('');
+  const [folkGuideName, setFolkGuideName] = useState('');
 
   useEffect(() => {
     fetchPerson();
@@ -73,9 +79,63 @@ export function ContactDetailScreen({ route, navigation }: Props) {
   async function fetchPerson() {
     setLoading(true);
     try {
-      const api = getApiClient();
-      const response = await api.get(`/people/${personId}`);
-      setPerson(response.data);
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from('people')
+        .select('*')
+        .eq('id', personId)
+        .single();
+
+      if (error) throw error;
+      if (!data) throw new Error('Person not found');
+
+      const p: Person = {
+        id: data.id,
+        fullName: data.fullName || data.full_name || '',
+        phone: data.phone,
+        photoUrl: data.photo_url || data.photoUrl,
+        age: data.age,
+        currentFolkStage: data.currentFolkStage || data.current_folk_stage,
+        location: data.location,
+        stayingWith: data.stayingWith || data.staying_with,
+        occupation: data.occupation,
+        organisation: data.organisation || data.organization,
+        nativePlace: data.nativePlace || data.native_place,
+        sgRating: data.sgRating || data.sg_rating,
+        chantingStatus: data.chantingStatus || data.chanting_status,
+        relationshipStatus: data.relationshipStatus || data.relationship_status,
+        verifiedByFg: data.verifiedByFg || data.verified_by_fg,
+        enablerId: data.enablerId || data.enabler_id,
+        folkGuideId: data.folkGuideId || data.folk_guide_id,
+        folkId: data.folkId || data.folk_id,
+        createdAt: data.createdAt || data.created_at,
+        progress: data.progress || [],
+        callHistory: data.callHistory || data.call_history || [],
+        attendanceHistory: data.attendanceHistory || data.attendance_history || [],
+        generalRemarks: data.generalRemarks || data.general_remarks,
+        lastCallStatus: data.lastCallStatus || data.last_call_status,
+        lastCallAt: data.lastCallAt || data.last_call_at,
+        nextFollowUpAt: data.nextFollowUpAt || data.next_follow_up_at,
+      };
+
+      setPerson(p);
+
+      if (p.enablerId) {
+        const { data: eData } = await supabase
+          .from('people')
+          .select('fullName, full_name')
+          .eq('id', p.enablerId)
+          .single();
+        if (eData) setEnablerName(eData.fullName || eData.full_name || '');
+      }
+      if (p.folkGuideId) {
+        const { data: fData } = await supabase
+          .from('people')
+          .select('fullName, full_name')
+          .eq('id', p.folkGuideId)
+          .single();
+        if (fData) setFolkGuideName(fData.fullName || fData.full_name || '');
+      }
     } catch (err) {
       console.error('Failed to fetch person:', err);
       Alert.alert('Error', 'Failed to load contact details');
@@ -114,6 +174,43 @@ export function ContactDetailScreen({ route, navigation }: Props) {
     );
   }
 
+  function handleProgressChange(
+    catIndex: number,
+    itemIndex: number,
+    levelIndex: number,
+    value: string,
+    field: 'achieved' | 'remark'
+  ) {
+    if (!person) return;
+    const progress = [...(person.progress || [])];
+    if (!progress[catIndex]) return;
+    const items = [...progress[catIndex].items];
+    const item = { ...items[itemIndex] };
+    const answers = { ...item.answers };
+    const levelKey = `l${levelIndex + 1}`;
+    const remarkKey = `l${levelIndex + 1}_remark`;
+    answers[field === 'achieved' ? levelKey : remarkKey] = value;
+    item.answers = answers;
+    items[itemIndex] = item;
+    progress[catIndex] = { ...progress[catIndex], items };
+    setPerson({ ...person, progress });
+  }
+
+  async function handleSaveProgress() {
+    if (!person) return;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase
+        .from('people')
+        .update({ progress: person.progress })
+        .eq('id', person.id);
+      if (error) throw error;
+      Alert.alert('Saved', 'Progress updated successfully');
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Failed to save progress');
+    }
+  }
+
   if (loading) {
     return <Loading message="Loading contact..." />;
   }
@@ -130,17 +227,33 @@ export function ContactDetailScreen({ route, navigation }: Props) {
     <ScrollView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>
-            {person.fullName.charAt(0).toUpperCase()}
-          </Text>
-        </View>
+        {person.photoUrl ? (
+          <Image
+            source={{ uri: person.photoUrl }}
+            style={styles.photo}
+          />
+        ) : (
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>
+              {person.fullName.charAt(0).toUpperCase()}
+            </Text>
+          </View>
+        )}
         <Text style={styles.name}>{person.fullName}</Text>
         {person.phone && <Text style={styles.phone}>📞 {person.phone}</Text>}
         <Text style={styles.stageBadge}>
           {person.currentFolkStage || 'Unknown'}
         </Text>
       </View>
+
+      {/* Enabler / Folk Guide Info */}
+      {(enablerName || folkGuideName) && (
+        <Card style={styles.card}>
+          <Text style={styles.cardTitle}>Assigned To</Text>
+          {enablerName ? renderInfoRow('Enabler', enablerName) : null}
+          {folkGuideName ? renderInfoRow('Folk Guide', folkGuideName) : null}
+        </Card>
+      )}
 
       {/* Personal Info */}
       <Card style={styles.card}>
@@ -151,26 +264,16 @@ export function ContactDetailScreen({ route, navigation }: Props) {
         {renderInfoRow('Organisation', person.organisation)}
         {renderInfoRow('Native Place', person.nativePlace)}
         {renderInfoRow('Age', person.age?.toString())}
-        {renderInfoRow(
-          'Relationship',
-          person.relationshipStatus
-        )}
+        {renderInfoRow('Relationship', person.relationshipStatus)}
         {renderInfoRow('Verified by FG', person.verifiedByFg)}
-        {person.folkId &&
-          renderInfoRow('Folk ID', person.folkId)}
+        {person.folkId && renderInfoRow('Folk ID', person.folkId)}
       </Card>
 
       {/* Spiritual Info */}
       <Card style={styles.card}>
         <Text style={styles.cardTitle}>Spiritual Info</Text>
-        {renderInfoRow(
-          'SG Rating',
-          person.sgRating?.toString()
-        )}
-        {renderInfoRow(
-          'Chanting Status',
-          person.chantingStatus?.toString()
-        )}
+        {renderInfoRow('SG Rating', person.sgRating?.toString())}
+        {renderInfoRow('Chanting Status', person.chantingStatus?.toString())}
       </Card>
 
       {/* Last Call Info */}
@@ -190,11 +293,25 @@ export function ContactDetailScreen({ route, navigation }: Props) {
       {person.generalRemarks && (
         <Card style={styles.card}>
           <Text style={styles.cardTitle}>Remarks</Text>
-          <Text style={styles.remarksText}>
-            {person.generalRemarks}
-          </Text>
+          <Text style={styles.remarksText}>{person.generalRemarks}</Text>
         </Card>
       )}
+
+      {/* Progress Tracker */}
+      <Card style={styles.card}>
+        <Text style={styles.cardTitle}>Spiritual Progress</Text>
+        <ProgressTracker
+          progress={person.progress}
+          onProgressChange={handleProgressChange}
+          isEditable={true}
+        />
+        <Button
+          title="Save Progress"
+          onPress={handleSaveProgress}
+          variant="primary"
+          style={styles.saveProgressBtn}
+        />
+      </Card>
 
       {/* Call History */}
       <Card style={styles.card}>
@@ -205,9 +322,7 @@ export function ContactDetailScreen({ route, navigation }: Props) {
           person.callHistory.map((log, index) => (
             <View key={log.id || index} style={styles.historyItem}>
               <View style={styles.historyHeader}>
-                <Text style={styles.historyStatus}>
-                  {log.status}
-                </Text>
+                <Text style={styles.historyStatus}>{log.status}</Text>
                 <Text style={styles.historyDate}>
                   {log.calledAt
                     ? new Date(log.calledAt).toLocaleDateString()
@@ -215,14 +330,10 @@ export function ContactDetailScreen({ route, navigation }: Props) {
                 </Text>
               </View>
               {log.callerName && (
-                <Text style={styles.historyDetail}>
-                  By: {log.callerName}
-                </Text>
+                <Text style={styles.historyDetail}>By: {log.callerName}</Text>
               )}
               {log.remark && (
-                <Text style={styles.historyDetail}>
-                  {log.remark}
-                </Text>
+                <Text style={styles.historyDetail}>{log.remark}</Text>
               )}
             </View>
           ))
@@ -236,8 +347,7 @@ export function ContactDetailScreen({ route, navigation }: Props) {
         <Text style={styles.cardTitle}>
           Attendance ({person.attendanceHistory?.length || 0})
         </Text>
-        {person.attendanceHistory &&
-        person.attendanceHistory.length > 0 ? (
+        {person.attendanceHistory && person.attendanceHistory.length > 0 ? (
           person.attendanceHistory.map((entry, index) => (
             <View key={index} style={styles.historyItem}>
               <Text style={styles.historyStatus}>
@@ -256,9 +366,7 @@ export function ContactDetailScreen({ route, navigation }: Props) {
             </View>
           ))
         ) : (
-          <Text style={styles.emptyText}>
-            No attendance records
-          </Text>
+          <Text style={styles.emptyText}>No attendance records</Text>
         )}
       </Card>
 
@@ -316,6 +424,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: Spacing.xxl,
     backgroundColor: Colors.primary,
+  },
+  photo: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginBottom: Spacing.md,
+    borderWidth: 3,
+    borderColor: Colors.textOnPrimary,
   },
   avatar: {
     width: 72,
@@ -417,6 +533,10 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
     textAlign: 'center',
     paddingVertical: Spacing.lg,
+  },
+  saveProgressBtn: {
+    marginTop: Spacing.md,
+    height: 40,
   },
   actions: {
     padding: Spacing.lg,

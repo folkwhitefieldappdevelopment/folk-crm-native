@@ -12,62 +12,107 @@ import {
 import { Colors, FontSize, Spacing, BorderRadius } from '../theme';
 import { Card } from '../ui/components/Card';
 import { Button } from '../ui/components/Button';
-import { getApiClient } from '../services/api-client';
 import { useConnectivity } from '../contexts/connectivity-context';
+import { getSupabase } from '../services/supabase-client';
+import { useAuth } from '../contexts/auth-context';
 
 interface Contact {
   id: string;
-  fullName: string;
+  full_name: string;
   phone?: string;
-  currentFolkStage?: string;
+  current_folk_stage?: string;
   location?: string;
 }
 
 interface Props {
   navigation: any;
+  route: any;
 }
 
-export function ContactsScreen({ navigation }: Props) {
+export function ContactsScreen({ navigation, route }: Props) {
+  const { user } = useAuth();
+  const { isConnected } = useConnectivity();
+  const userId = user?.id;
+
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [hasMore, setHasMore] = useState(true);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
   const pageRef = useRef(0);
-  const { isConnected } = useConnectivity();
   const pageSize = 50;
+
+  const buildBaseQuery = useCallback(() => {
+    const supabase = getSupabase();
+    let query = supabase
+      .from('people')
+      .select('id, full_name, phone, current_folk_stage, location', { count: 'exact' })
+      .eq('is_deleted', false);
+
+    const params = route?.params || {};
+
+    if (params.scope === 'my' && userId) {
+      query = query.eq('enabler_id', userId);
+    }
+
+    if (params.isSg === 'true') {
+      query = query.eq('is_sg', true);
+    }
+
+    if (params.chantingStatus) {
+      query = query.gte('chanting_status', parseInt(params.chantingStatus, 10));
+    }
+
+    if (params.folkStage) {
+      query = query.eq('current_folk_stage', params.folkStage);
+    }
+
+    if (params.enablerId) {
+      query = query.eq('enabler_id', params.enablerId);
+    }
+
+    if (params.contactSource) {
+      query = query.contains('contact_source', [params.contactSource]);
+    }
+
+    if (params.callStatus) {
+      query = query.eq('last_call_status', params.callStatus);
+    }
+
+    if (search.trim()) {
+      query = query.or(`full_name.ilike.%${search.trim()}%,phone.ilike.%${search.trim()}%`);
+    }
+
+    return query;
+  }, [userId, route?.params, search]);
 
   const fetchContacts = useCallback(async (reset = false) => {
     if (loading) return;
     setLoading(true);
 
     try {
-      const api = getApiClient();
-      const skip = reset ? 0 : pageRef.current * pageSize;
-      const response = await api.get('/people', {
-        params: {
-          skip,
-          take: pageSize,
-          search: search || undefined,
-        },
-      });
+      const baseQuery = buildBaseQuery();
+      const from = reset ? 0 : pageRef.current * pageSize;
+      const to = from + pageSize - 1;
 
-      const data: Contact[] = response.data;
+      const { data, count } = await baseQuery.range(from, to).order('created_at', { ascending: false });
 
       if (reset) {
-        setContacts(data);
+        setContacts(data || []);
         pageRef.current = 1;
       } else {
-        setContacts((prev) => [...prev, ...data]);
+        setContacts((prev) => [...prev, ...(data || [])]);
         pageRef.current += 1;
       }
 
-      setHasMore(data.length === pageSize);
+      setTotalCount(count || 0);
+      setHasMore((data || []).length === pageSize);
     } catch (err) {
       console.error('Failed to fetch contacts:', err);
     } finally {
       setLoading(false);
     }
-  }, [search]);
+  }, [buildBaseQuery]);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
@@ -87,6 +132,9 @@ export function ContactsScreen({ navigation }: Props) {
       fetchContacts();
     }
   }
+
+  const params = route?.params || {};
+  const activeFilterCount = Object.keys(params).filter(k => k !== 'scope' && params[k]).length;
 
   return (
     <View style={styles.container}>
@@ -115,12 +163,24 @@ export function ContactsScreen({ navigation }: Props) {
         </TouchableOpacity>
       </View>
 
+      {activeFilterCount > 0 && (
+        <Card style={styles.filterBanner}>
+          <Text style={styles.filterBannerText}>
+            Filters active ({activeFilterCount})
+          </Text>
+        </Card>
+      )}
+
       {isConnected ? null : (
         <Card style={styles.offlineBanner}>
           <Text style={styles.offlineText}>
             Offline — showing cached data
           </Text>
         </Card>
+      )}
+
+      {totalCount !== null && contacts.length > 0 && (
+        <Text style={styles.countText}>{totalCount} contact{totalCount !== 1 ? 's' : ''} found</Text>
       )}
 
       {loading && contacts.length === 0 ? (
@@ -145,21 +205,21 @@ export function ContactsScreen({ navigation }: Props) {
               <View style={styles.contactRow}>
                 <View style={styles.contactAvatar}>
                   <Text style={styles.contactAvatarText}>
-                    {item.fullName.charAt(0).toUpperCase()}
+                    {item.full_name.charAt(0).toUpperCase()}
                   </Text>
                 </View>
                 <View style={styles.contactInfo}>
                   <Text style={styles.contactName}>
-                    {item.fullName}
+                    {item.full_name}
                   </Text>
                   <Text style={styles.contactPhone}>
                     {item.phone}
                   </Text>
                   <Text style={styles.contactStage}>
-                    {item.currentFolkStage}
+                    {item.current_folk_stage}
                   </Text>
                 </View>
-                <Text style={styles.chevron}>›</Text>
+                <Text style={styles.chevron}>{'\u203A'}</Text>
               </View>
             </TouchableOpacity>
           )}
@@ -240,8 +300,19 @@ const styles = StyleSheet.create({
     color: Colors.textOnPrimary,
     marginTop: -2,
   },
+  filterBanner: {
+    margin: Spacing.md,
+    marginBottom: 0,
+    backgroundColor: Colors.primaryLight,
+  },
+  filterBannerText: {
+    fontWeight: 'bold',
+    color: Colors.primary,
+    textAlign: 'center',
+  },
   offlineBanner: {
     margin: Spacing.md,
+    marginBottom: 0,
     backgroundColor: Colors.warning,
   },
   offlineText: {
@@ -258,6 +329,13 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
     fontSize: FontSize.md,
     color: Colors.textSecondary,
+  },
+  countText: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.sm,
+    fontWeight: '600',
   },
   contactItem: {
     backgroundColor: Colors.surface,

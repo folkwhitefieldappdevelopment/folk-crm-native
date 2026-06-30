@@ -10,16 +10,14 @@ import {
 } from 'react-native';
 import { Colors, FontSize, Spacing, BorderRadius } from '../theme';
 import { Card } from '../ui/components/Card';
-import { getApiClient } from '../services/api-client';
+import { getSupabase } from '../services/supabase-client';
 
 interface Group {
   id: string;
   name: string;
   description?: string;
-  _count?: { members: number };
-  memberCount?: number;
-  isDynamic?: boolean;
-  createdByName?: string;
+  member_count?: number;
+  created_by_name?: string;
 }
 
 interface Props {
@@ -38,9 +36,12 @@ export function GroupListScreen({ navigation }: Props) {
 
   async function fetchGroups() {
     try {
-      const api = getApiClient();
-      const response = await api.get('/groups');
-      setGroups(response.data || []);
+      const supabase = getSupabase();
+      const { data } = await supabase
+        .from('groups')
+        .select('id, name, description, member_count, created_by_name')
+        .order('name');
+      setGroups(data || []);
     } catch (err) {
       console.error('Failed to fetch groups:', err);
     } finally {
@@ -55,7 +56,7 @@ export function GroupListScreen({ navigation }: Props) {
   }
 
   function getMemberCount(g: Group): number {
-    return g._count?.members ?? g.memberCount ?? 0;
+    return g.member_count ?? 0;
   }
 
   if (loading) {
@@ -97,9 +98,9 @@ export function GroupListScreen({ navigation }: Props) {
                     {item.description}
                   </Text>
                 )}
-                {item.createdByName && (
+                {item.created_by_name && (
                   <Text style={styles.groupMeta}>
-                    by {item.createdByName}
+                    by {item.created_by_name}
                   </Text>
                 )}
               </View>

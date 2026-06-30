@@ -84,7 +84,7 @@ export function SessionListScreen({ navigation }: Props) {
         <Text style={styles.headerTitle}>My Sessions</Text>
         <Button
           title="+ New"
-          onPress={() => navigation.navigate('SelectContacts')}
+          onPress={() => navigation.navigate('CallAssistant')}
           variant="accent"
           style={styles.newButton}
           textStyle={styles.newButtonText}
@@ -171,7 +171,7 @@ export function SessionListScreen({ navigation }: Props) {
               <Button
                 title="Start New Session"
                 onPress={() =>
-                  navigation.navigate('SelectContacts')
+                  navigation.navigate('CallAssistant')
                 }
                 variant="primary"
                 style={styles.startButton}
